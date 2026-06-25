@@ -1,0 +1,180 @@
+# name: Terraform CI/CD (AWS)
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       action:
+#         description: "Terraform Action"
+#         required: true
+#         default: "plan"
+#         type: choice
+#         options:
+#           - plan
+#           - apply
+#           - destroy
+#       environment:
+#         description: "Env to deploy"
+#         required: true
+#         default: "dev"
+#         type: choice
+#         options:
+#           - dev
+#           - qa
+#           - prod
+#       tf_directory:
+#         description: "Terraform Working Directory"
+#         required: true
+#         default: "aws/services/ec2-1"
+#       tf_var_file:
+#         description: "Path to tfvars file"
+#         required: false
+#         default: "../../../inputvars/dev"
+
+# jobs:
+#   terraform:
+#     runs-on: ubuntu-latest
+#     name: Terraform ${{ github.event.inputs.action }}
+
+#     env:
+#       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#       AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }} #us-east-2
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Setup Terraform
+#         uses: hashicorp/setup-terraform@v3
+#         with:
+#           terraform_version: 1.5.7
+
+#       - name: Terraform Init
+#         run: |
+#           terraform -chdir=${{ github.event.inputs.tf_directory }} init \
+#             -backend-config="bucket=amvitechawstfinitial" \
+#             -backend-config="key=${{ github.event.inputs.tf_directory }}/terraform.tfstate" \
+#             -backend-config="region=${{ env.AWS_DEFAULT_REGION }}" \
+#             -backend-config="dynamodb_table=amviTech_aws_tf" \
+#             -backend-config="encrypt=true"
+
+#       - name: Terraform Validate
+#         run: terraform -chdir=${{ github.event.inputs.tf_directory }} validate
+
+#       # Terraform Plan
+#       - name: Terraform Plan
+#         if: ${{ github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply' || github.event.inputs.action == 'both' }}
+#         run: |
+#           terraform -chdir=${{ github.event.inputs.tf_directory }} plan \
+#             -var-file=${{ github.event.inputs.tf_var_file }} \
+#             -out=tfplan
+      
+#       # Terraform Apply
+#       - name: Terraform Apply
+#         if: ${{ github.event.inputs.action == 'apply' || github.event.inputs.action == 'both' }}
+#         run: |
+#           terraform -chdir=${{ github.event.inputs.tf_directory }} apply -auto-approve tfplan
+
+
+#       - name: Terraform Destroy
+#         if: ${{ github.event.inputs.action == 'destroy' }}
+#         run: |
+#           terraform -chdir=${{ github.event.inputs.tf_directory }} destroy \
+#             -auto-approve \
+#             -var-file=${{ github.event.inputs.tf_var_file }}
+
+
+
+
+
+
+name: Terraform CI/CD (AWS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform Action"
+        required: true
+        default: "plan"
+        type: choice
+        options: [plan, apply, destroy]
+      environment:
+        description: "Env to deploy"
+        required: true
+        default: "dev"
+        type: choice
+        options: [dev, qa, prod]
+      tf_directory:
+        description: "Terraform Working Directory"
+        required: true
+        default: "aws/services/ec2-1"
+      tf_var_file:
+        description: "Path to tfvars file"
+        required: true
+        default: "../../../inputvars/dev"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    name: Terraform ${{ github.event.inputs.action }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_DEFAULT_REGION: us-east-2
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::635769555675:role/terraform-assume-role
+          aws-region: us-east-2
+
+      - name: Debug AWS identity
+        run: |
+          aws sts get-caller-identity
+          aws s3api head-bucket --bucket amvitechawstfinitial
+          aws dynamodb describe-table --table-name amviTech_aws_tf
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=${{ github.event.inputs.tf_directory }} init \
+            -backend-config="bucket=amvitechawstfinitial" \
+            -backend-config="key=state/${{ github.event.inputs.environment }}/${{ github.event.inputs.tf_directory }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_DEFAULT_REGION }}" \
+            -backend-config="dynamodb_table=amviTech_aws_tf" \
+            -backend-config="encrypt=true"
+
+      
+      - name: Terraform Validate
+        run: terraform -chdir=${{ github.event.inputs.tf_directory }} validate
+
+
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply' }}
+        run: |
+          terraform -chdir=${{ github.event.inputs.tf_directory }} plan \
+            -var-file=${{ github.event.inputs.tf_var_file }} \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: terraform -chdir=${{ github.event.inputs.tf_directory }} apply -auto-approve tfplan
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: |
+          terraform -chdir=${{ github.event.inputs.tf_directory }} destroy \
+            -auto-approve \
+            -var-file=${{ github.event.inputs.tf_var_file }}
